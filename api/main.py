@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Header, Response, status
+from fastapi import FastAPI, Header, Response, status, Depends
+from fastapi.security import HTTPAuthorizationCredentials
 from uuid import UUID, uuid4
 from typing import Annotated
 from random import choice
@@ -9,39 +10,82 @@ import auth
 
 app = FastAPI()
 
-# @app.get("/")
-# def info():
-#     ...
-
 @app.post("/v1/sandboxes/")
-def create_sandbox(body: SandBoxCreate, authorization: Annotated[str, Header()], response: Response):
-    auth_info = authorization.split(" ")
-    if auth_info[0] != "Bearer":
-        response.status_code = status.HTTP_400_BAD_REQUEST
-        return "Auth failure: expected Bearer auth"
-    if not auth.validate_token(auth_info[1], "create", "sandboxes"):
+def create_sandbox(body: SandBoxCreate, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
+    if not auth.validate_token(authorization.credentials, "create", "sandboxes"):
         response.status_code = status.HTTP_401_UNAUTHORIZED
-        return "Unauthorized"
+        return {"detail": "token is invalid or does not have the correct access scopes"}
     vm_ip = choice(store.get("ips"))
-    store.get("ips").remove(vm_ip)
+    store["ips"].remove(vm_ip)
     expiry_utc = datetime.now() + timedelta(days=body.ttl_days)
     etag = body.name + body.owner_email + str(datetime.now())
-    new_op = Operation(_id=uuid4(), rg_name=f"rg-{body.name}", vm_public_ip=vm_ip, expiry_utc=expiry_utc, etag=etag, status=Status.CREATING) 
+    _id = uuid4()
+    new_op = Operation(id=_id, rg_name=f"rg-{body.name}", vm_public_ip=vm_ip, expiry_utc=expiry_utc, etag=etag, status=Status.CREATING) 
+    store["operations"].append(new_op)
+    new_op2 = Operation(id=new_op.id, rg_name=new_op.rg_name, vm_public_ip=new_op.vm_public_ip, expiry_utc=new_op.expiry_utc, etag=new_op.etag, status=Status.READY)
+    store["operations"].append(new_op2)
+    sandbox = SandBox(id=_id, rg_name=new_op.rg_name, nsg_id=f"rg-{body.name}-nsg", expiry_utc=expiry_utc, etag=etag, allowed_cidrs=body.allowed_cidrs, vm_public_ip=vm_ip)
+    store["sandboxes"].append(sandbox)
     response.status_code = status.HTTP_202_ACCEPTED
-    return new_op
+    return new_op2
 
 @app.get("/v1/sandboxes/{uuid}")
-def get_sandbox(uuid: str):
-    ...
+def get_sandbox(uuid: UUID, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
+    if not auth.validate_token(authorization.credentials, "list", "sandboxes"):
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"detail": "token is invalid or does not have the correct access scopes"}
+    for sb in store.get("sandboxes"):
+        if sb.id == uuid:
+            response.status_code = status.HTTP_200_OK
+            return sb
+    response.status_code = status.HTTP_404_NOT_FOUND
+    return {"detail": f"no sandbox matching id {uuid}"}
 
 @app.patch("/v1/sandboxes/{uuid}")
-def patch_sandbox(uuid: str):
-    ...
+def patch_sandbox(uuid: UUID, body: SandBoxCreate, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
+    if not auth.validate_token(authorization.credentials, "update", "sandboxes"):
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"detail": "token is invalid or does not have the correct access scopes"}
+    for sb in store["sandboxes"]:
+        if sb.id == uuid:
+            if sb.etag != body.etag:
+                response.status_code = status.HTTP_412_PRECONDITION_FAILED
+                return {"detail": "resource version mismatch"}
+            response.status_code = status.HTTP_202_ACCEPTED
+            new_expiry_utc = datetime.now() + timedelta(body.ttl_days)
+            new_etag = body.name + body.owner_email + str(datetime.now())
+            update_op = Operation(id=uuid, rg_name=sb.rg_name, vm_public_ip=sb.vm_public_ip, expiry_utc=new_expiry_utc, etag=new_etag, status=Status.UPDATING)
+            store["operations"].append(update_op)
+            sb.expiry_utc = new_expiry_utc
+            sb.etag = new_etag
+            update_op2 = Operation(id=uuid, rg_name=sb.rg_name, vm_public_ip=sb.vm_public_ip, expiry_utc=new_expiry_utc, etag=new_etag, status=Status.READY)
+            store["operations"].append(update_op2)
+            return update_op
+    response.status_code = status.HTTP_404_NOT_FOUND
+    return {"detail": f"no sandbox matching id {uuid}"}
 
 @app.delete("/v1/sandboxes/{uuid}")
-def delete_sandbox(uuid: str):
-    ...
+def delete_sandbox(uuid: UUID, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
+    if not auth.validate_token(authorization.credentials, "delete", "sandboxes"):
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"detail": "token is invalid or does not have the correct access scopes"}
+    for sb in store["sandboxes"]:
+        if sb.id == uuid:
+            terminating_op = Operation(id=uuid, rg_name=sb.rg_name, vm_public_ip=sb.vm_public_ip, expiry_utc=sb.expiry_utc, etag=sb.etag, status=Status.TERMINATING)
+            store["operations"].append(terminating_op)
+            store["ips"].append(sb.vm_public_ip)
+            store["sandboxes"].remove(sb)
+            terminated_op = Operation(id=uuid, rg_name=terminating_op.rg_name, vm_public_ip=terminating_op.vm_public_ip, expiry_utc=terminating_op.expiry_utc, etag=terminating_op.etag, status=Status.TERMINATED)
+            store["operations"].append(terminated_op)
+            response.status_code = status.HTTP_202_ACCEPTED
+            return terminated_op
+    response.status_code = status.HTTP_200_OK
+    return {"detail": "already deleted"}
 
 @app.get("/v1/operations/{id}")
-def get_operations(id: str):
-    ...
+def get_operations(id: UUID, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
+    if not auth.validate_token(authorization.credentials, "list", "operations"):
+        response.status_code = status.HTTP_401_UNAUTHORIZED
+        return {"detail": "token is invalid or does not have the correct access scopes"}
+    response.status_code = status.HTTP_200_OK
+    return [op for op in store.get("operations") if op.id == id]
