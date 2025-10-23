@@ -12,8 +12,8 @@ class Status(str, Enum):
     ERROR = "Error"
 
 class Size(str, Enum):
-    SMALL = "small" #Standard_B2s
-    MEDIUM = "medium" #Standard_B4ms
+    SMALL = "small" #e2-small
+    MEDIUM = "medium" #e2-medium
 
 class SandBoxCreate(BaseModel):
     name: str
@@ -21,19 +21,17 @@ class SandBoxCreate(BaseModel):
     size: Size
     ttl_days: int = Field(gt=0, le=30)
     allowed_cidrs: list[str]
-    etag: str | None = None
 
 class Operation(BaseModel):
     id: UUID
+    sandbox_id: UUID
     rg_name: str
-    vm_public_ip: str = Field(pattern="^[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}$")
     username: str | None = "azureuser"
-    expiry_utc: datetime
-    etag: str
     status: Status
 
 class SandBox(BaseModel):
     id: UUID
+    vm_size: str
     rg_name: str
     nsg_id: str
     expiry_utc: datetime

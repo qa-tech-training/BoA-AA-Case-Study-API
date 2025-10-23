@@ -10,6 +10,8 @@ import auth
 
 app = FastAPI()
 
+size_table = {Size.SMALL:"e2-small", Size.MEDIUM:"e2-medium"}
+
 @app.post("/v1/sandboxes/")
 def create_sandbox(body: SandBoxCreate, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
     if not auth.validate_token(authorization.credentials, "create", "sandboxes"):
@@ -20,11 +22,11 @@ def create_sandbox(body: SandBoxCreate, authorization: Annotated[HTTPAuthorizati
     expiry_utc = datetime.now() + timedelta(days=body.ttl_days)
     etag = body.name + body.owner_email + str(datetime.now())
     _id = uuid4()
-    new_op = Operation(id=_id, rg_name=f"rg-{body.name}", vm_public_ip=vm_ip, expiry_utc=expiry_utc, etag=etag, status=Status.CREATING) 
+    new_op = Operation(id=uuid4(), sandbox_id=_id, rg_name=f"rg-{body.name}", status=Status.CREATING) 
     store["operations"].append(new_op)
-    new_op2 = Operation(id=new_op.id, rg_name=new_op.rg_name, vm_public_ip=new_op.vm_public_ip, expiry_utc=new_op.expiry_utc, etag=new_op.etag, status=Status.READY)
+    new_op2 = Operation(id=uuid4(), sandbox_id=_id, rg_name=new_op.rg_name, status=Status.READY)
     store["operations"].append(new_op2)
-    sandbox = SandBox(id=_id, rg_name=new_op.rg_name, nsg_id=f"rg-{body.name}-nsg", expiry_utc=expiry_utc, etag=etag, allowed_cidrs=body.allowed_cidrs, vm_public_ip=vm_ip)
+    sandbox = SandBox(id=_id, rg_name=new_op.rg_name, vm_size=size_table.get(body.size), nsg_id=f"rg-{body.name}-nsg", expiry_utc=expiry_utc, etag=etag, allowed_cidrs=body.allowed_cidrs, vm_public_ip=vm_ip)
     store["sandboxes"].append(sandbox)
     response.status_code = status.HTTP_202_ACCEPTED
     return new_op2
@@ -42,23 +44,24 @@ def get_sandbox(uuid: UUID, authorization: Annotated[HTTPAuthorizationCredential
     return {"detail": f"no sandbox matching id {uuid}"}
 
 @app.patch("/v1/sandboxes/{uuid}")
-def patch_sandbox(uuid: UUID, body: SandBoxCreate, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
+def patch_sandbox(if_match: Annotated[str, Header()], uuid: UUID, body: SandBoxCreate, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
     if not auth.validate_token(authorization.credentials, "update", "sandboxes"):
         response.status_code = status.HTTP_401_UNAUTHORIZED
         return {"detail": "token is invalid or does not have the correct access scopes"}
     for sb in store["sandboxes"]:
         if sb.id == uuid:
-            if sb.etag != body.etag:
+            if sb.etag != if_match:
                 response.status_code = status.HTTP_412_PRECONDITION_FAILED
                 return {"detail": "resource version mismatch"}
             response.status_code = status.HTTP_202_ACCEPTED
             new_expiry_utc = datetime.now() + timedelta(body.ttl_days)
             new_etag = body.name + body.owner_email + str(datetime.now())
-            update_op = Operation(id=uuid, rg_name=sb.rg_name, vm_public_ip=sb.vm_public_ip, expiry_utc=new_expiry_utc, etag=new_etag, status=Status.UPDATING)
+            update_op = Operation(id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.UPDATING)
             store["operations"].append(update_op)
             sb.expiry_utc = new_expiry_utc
             sb.etag = new_etag
-            update_op2 = Operation(id=uuid, rg_name=sb.rg_name, vm_public_ip=sb.vm_public_ip, expiry_utc=new_expiry_utc, etag=new_etag, status=Status.READY)
+            sb.vm_size = size_table.get(body.size)
+            update_op2 = Operation(id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.READY)
             store["operations"].append(update_op2)
             return update_op
     response.status_code = status.HTTP_404_NOT_FOUND
@@ -71,11 +74,11 @@ def delete_sandbox(uuid: UUID, authorization: Annotated[HTTPAuthorizationCredent
         return {"detail": "token is invalid or does not have the correct access scopes"}
     for sb in store["sandboxes"]:
         if sb.id == uuid:
-            terminating_op = Operation(id=uuid, rg_name=sb.rg_name, vm_public_ip=sb.vm_public_ip, expiry_utc=sb.expiry_utc, etag=sb.etag, status=Status.TERMINATING)
+            terminating_op = Operation(id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.TERMINATING)
             store["operations"].append(terminating_op)
             store["ips"].append(sb.vm_public_ip)
             store["sandboxes"].remove(sb)
-            terminated_op = Operation(id=uuid, rg_name=terminating_op.rg_name, vm_public_ip=terminating_op.vm_public_ip, expiry_utc=terminating_op.expiry_utc, etag=terminating_op.etag, status=Status.TERMINATED)
+            terminated_op = Operation(id=uuid4(), sanbox_id=uuid, rg_name=terminating_op.rg_name, status=Status.TERMINATED)
             store["operations"].append(terminated_op)
             response.status_code = status.HTTP_202_ACCEPTED
             return terminated_op
@@ -88,4 +91,4 @@ def get_operations(id: UUID, authorization: Annotated[HTTPAuthorizationCredentia
         response.status_code = status.HTTP_401_UNAUTHORIZED
         return {"detail": "token is invalid or does not have the correct access scopes"}
     response.status_code = status.HTTP_200_OK
-    return [op for op in store.get("operations") if op.id == id]
+    return [op for op in store.get("operations") if op.sandbox_id == id]
