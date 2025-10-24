@@ -12,7 +12,7 @@ app = FastAPI()
 
 size_table = {Size.SMALL:"e2-small", Size.MEDIUM:"e2-medium"}
 
-@app.post("/v1/sandboxes/")
+@app.post("/v1/sandboxes")
 def create_sandbox(body: SandBoxCreate, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
     if not auth.validate_token(authorization.credentials, "create", "sandboxes"):
         response.status_code = status.HTTP_401_UNAUTHORIZED
