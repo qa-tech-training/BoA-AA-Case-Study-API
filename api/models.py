@@ -22,6 +22,7 @@ class SandBoxCreate(BaseModel):
     size: Size
     ttl_days: int = Field(gt=0, le=30)
     allowed_cidrs: list[str]
+    id: UUID | None = None
 
     @field_validator("allowed_cidrs")
     @classmethod
@@ -35,7 +36,7 @@ class Operation(BaseModel):
     id: UUID
     sandbox_id: UUID
     rg_name: str
-    username: str | None = "azureuser"
+    username: str | None = "clouduser"
     status: Status
 
 class SandBox(BaseModel):

@@ -12,6 +12,9 @@ app = FastAPI()
 
 size_table = {Size.SMALL:"e2-small", Size.MEDIUM:"e2-medium"}
 
+def exists(sandbox_id):
+    return any(sb.id == sandbox_id for sb in store.get("sandboxes"))
+
 @app.post("/v1/sandboxes")
 def create_sandbox(body: SandBoxCreate, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
     if not auth.validate_token(authorization.credentials, "create", "sandboxes"):
@@ -21,7 +24,10 @@ def create_sandbox(body: SandBoxCreate, authorization: Annotated[HTTPAuthorizati
     store["ips"].remove(vm_ip)
     expiry_utc = datetime.now() + timedelta(days=body.ttl_days)
     etag = body.name + body.owner_email + str(datetime.now())
-    _id = uuid4()
+    _id = body.id if body.id else uuid4()
+    if exists(_id):
+        response.status_code = status.HTTP_200_OK
+        return {"detail": f"sandbox exists with id {_id}"}
     new_op = Operation(id=uuid4(), sandbox_id=_id, rg_name=f"rg-{body.name}", status=Status.CREATING) 
     store["operations"].append(new_op)
     new_op2 = Operation(id=uuid4(), sandbox_id=_id, rg_name=new_op.rg_name, status=Status.READY)
@@ -49,6 +55,9 @@ def patch_sandbox(if_match: Annotated[str | None, Header()], uuid: UUID, body: S
         response.status_code = status.HTTP_401_UNAUTHORIZED
         return {"detail": "token is invalid or does not have the correct access scopes"}
     for sb in store["sandboxes"]:
+        if not uuid:
+            response.status_code = status.HTTP_400_BAD_REQUEST
+            return {"detail": "no sandbox ID specified"}
         if sb.id == uuid:
             if sb.etag != if_match:
                 response.status_code = status.HTTP_412_PRECONDITION_FAILED
@@ -76,6 +85,9 @@ def delete_sandbox(uuid: UUID, authorization: Annotated[HTTPAuthorizationCredent
     if not auth.validate_token(authorization.credentials, "delete", "sandboxes"):
         response.status_code = status.HTTP_401_UNAUTHORIZED
         return {"detail": "token is invalid or does not have the correct access scopes"}
+    if not uuid:
+        response.status_code = status.HTTP_400_BAD_REQUEST
+        return {"detail": "no sandbox ID specified"}
     for sb in store["sandboxes"]:
         if sb.id == uuid:
             terminating_op = Operation(id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.TERMINATING)
@@ -94,5 +106,8 @@ def get_operations(id: UUID, authorization: Annotated[HTTPAuthorizationCredentia
     if not auth.validate_token(authorization.credentials, "list", "operations"):
         response.status_code = status.HTTP_401_UNAUTHORIZED
         return {"detail": "token is invalid or does not have the correct access scopes"}
+    if not id:
+        response.status_code = status.HTTP_400_BAD_REQUEST
+        return {"detail": "no sandbox ID specified"}
     response.status_code = status.HTTP_200_OK
     return [op for op in store.get("operations") if op.sandbox_id == id]
