@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from uuid import UUID
 from enum import Enum 
+import re
 
 class Status(str, Enum):
     CREATING = "Creating"
@@ -21,6 +22,14 @@ class SandBoxCreate(BaseModel):
     size: Size
     ttl_days: int = Field(gt=0, le=30)
     allowed_cidrs: list[str]
+
+    @field_validator("allowed_cidrs")
+    @classmethod
+    def validate_cidrs(cls, value):
+        valid_cidr = re.compile("^[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}/[0-9]{1,2}$")
+        if not all(valid_cidr.match(cidr) for cidr in value):
+            raise ValueError("invalid cidr range in allowed_cidrs")
+        return value
 
 class Operation(BaseModel):
     id: UUID
