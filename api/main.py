@@ -53,14 +53,18 @@ def patch_sandbox(if_match: Annotated[str, Header()], uuid: UUID, body: SandBoxC
             if sb.etag != if_match:
                 response.status_code = status.HTTP_412_PRECONDITION_FAILED
                 return {"detail": "resource version mismatch"}
-            response.status_code = status.HTTP_202_ACCEPTED
+            new_size = size_table.get(body.size)
             new_expiry_utc = datetime.now() + timedelta(body.ttl_days)
+            if sb.vm_size == new_size && sb.expiry_utc == new_expiry_utc:
+                response.status_code = status.HTTP_200_OK
+                return {"detail": "resource unchanged"}
+            response.status_code = status.HTTP_202_ACCEPTED
             new_etag = body.name + body.owner_email + str(datetime.now())
             update_op = Operation(id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.UPDATING)
             store["operations"].append(update_op)
             sb.expiry_utc = new_expiry_utc
             sb.etag = new_etag
-            sb.vm_size = size_table.get(body.size)
+            sb.vm_size = new_size
             update_op2 = Operation(id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.READY)
             store["operations"].append(update_op2)
             return update_op
