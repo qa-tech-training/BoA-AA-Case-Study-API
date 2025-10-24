@@ -44,7 +44,7 @@ def get_sandbox(uuid: UUID, authorization: Annotated[HTTPAuthorizationCredential
     return {"detail": f"no sandbox matching id {uuid}"}
 
 @app.patch("/v1/sandboxes/{uuid}")
-def patch_sandbox(if_match: Annotated[str, Header()], uuid: UUID, body: SandBoxCreate, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
+def patch_sandbox(if_match: Annotated[str | None, Header()], uuid: UUID, body: SandBoxCreate, authorization: Annotated[HTTPAuthorizationCredentials, Depends(auth.security)], response: Response):
     if not auth.validate_token(authorization.credentials, "update", "sandboxes"):
         response.status_code = status.HTTP_401_UNAUTHORIZED
         return {"detail": "token is invalid or does not have the correct access scopes"}
@@ -82,7 +82,7 @@ def delete_sandbox(uuid: UUID, authorization: Annotated[HTTPAuthorizationCredent
             store["operations"].append(terminating_op)
             store["ips"].append(sb.vm_public_ip)
             store["sandboxes"].remove(sb)
-            terminated_op = Operation(id=uuid4(), sanbox_id=uuid, rg_name=terminating_op.rg_name, status=Status.TERMINATED)
+            terminated_op = Operation(id=uuid4(), sandbox_id=uuid, rg_name=terminating_op.rg_name, status=Status.TERMINATED)
             store["operations"].append(terminated_op)
             response.status_code = status.HTTP_202_ACCEPTED
             return terminated_op
