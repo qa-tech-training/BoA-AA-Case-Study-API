@@ -55,7 +55,7 @@ def patch_sandbox(if_match: Annotated[str, Header()], uuid: UUID, body: SandBoxC
                 return {"detail": "resource version mismatch"}
             new_size = size_table.get(body.size)
             new_expiry_utc = datetime.now() + timedelta(body.ttl_days)
-            if sb.vm_size == new_size && sb.expiry_utc == new_expiry_utc:
+            if sb.vm_size == new_size and sb.expiry_utc == new_expiry_utc:
                 response.status_code = status.HTTP_200_OK
                 return {"detail": "resource unchanged"}
             response.status_code = status.HTTP_202_ACCEPTED
