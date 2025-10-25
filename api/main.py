@@ -24,6 +24,7 @@ def create_sandbox(body: SandBoxCreate, authorization: Annotated[HTTPAuthorizati
     store["ips"].remove(vm_ip)
     expiry_utc = datetime.now() + timedelta(days=body.ttl_days)
     etag = body.name + body.owner_email + str(datetime.now())
+    etag = etag.replace(" ", "")
     _id = body.id if body.id else uuid4()
     if exists(_id):
         response.status_code = status.HTTP_200_OK
