@@ -28,9 +28,9 @@ def create_sandbox(body: SandBoxCreate, authorization: Annotated[HTTPAuthorizati
     if exists(_id):
         response.status_code = status.HTTP_200_OK
         return {"detail": f"sandbox exists with id {_id}"}
-    new_op = Operation(id=uuid4(), sandbox_id=_id, rg_name=f"rg-{body.name}", status=Status.CREATING) 
+    new_op = Operation(timestamp = datetime.now(), id=uuid4(), sandbox_id=_id, rg_name=f"rg-{body.name}", status=Status.CREATING) 
     store["operations"].append(new_op)
-    new_op2 = Operation(id=uuid4(), sandbox_id=_id, rg_name=new_op.rg_name, status=Status.READY)
+    new_op2 = Operation(timestamp = datetime.now(), id=uuid4(), sandbox_id=_id, rg_name=new_op.rg_name, status=Status.READY)
     store["operations"].append(new_op2)
     sandbox = SandBox(id=_id, rg_name=new_op.rg_name, vm_size=size_table.get(body.size), nsg_id=f"rg-{body.name}-nsg", expiry_utc=expiry_utc, etag=etag, allowed_cidrs=body.allowed_cidrs, vm_public_ip=vm_ip)
     store["sandboxes"].append(sandbox)
@@ -69,12 +69,12 @@ def patch_sandbox(if_match: Annotated[str | None, Header()], uuid: UUID, body: S
                 return {"detail": "resource unchanged"}
             response.status_code = status.HTTP_202_ACCEPTED
             new_etag = body.name + body.owner_email + str(datetime.now())
-            update_op = Operation(id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.UPDATING)
+            update_op = Operation(timestamp = datetime.now(), id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.UPDATING)
             store["operations"].append(update_op)
             sb.expiry_utc = new_expiry_utc
             sb.etag = new_etag
             sb.vm_size = new_size
-            update_op2 = Operation(id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.READY)
+            update_op2 = Operation(timestamp = datetime.now(), id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.READY)
             store["operations"].append(update_op2)
             return update_op
     response.status_code = status.HTTP_404_NOT_FOUND
@@ -90,11 +90,11 @@ def delete_sandbox(uuid: UUID, authorization: Annotated[HTTPAuthorizationCredent
         return {"detail": "no sandbox ID specified"}
     for sb in store["sandboxes"]:
         if sb.id == uuid:
-            terminating_op = Operation(id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.TERMINATING)
+            terminating_op = Operation(timestamp = datetime.now(), id=uuid4(), sandbox_id=uuid, rg_name=sb.rg_name, status=Status.TERMINATING)
             store["operations"].append(terminating_op)
             store["ips"].append(sb.vm_public_ip)
             store["sandboxes"].remove(sb)
-            terminated_op = Operation(id=uuid4(), sandbox_id=uuid, rg_name=terminating_op.rg_name, status=Status.TERMINATED)
+            terminated_op = Operation(timestamp = datetime.now(), id=uuid4(), sandbox_id=uuid, rg_name=terminating_op.rg_name, status=Status.TERMINATED)
             store["operations"].append(terminated_op)
             response.status_code = status.HTTP_202_ACCEPTED
             return terminated_op
@@ -110,4 +110,4 @@ def get_operations(id: UUID, authorization: Annotated[HTTPAuthorizationCredentia
         response.status_code = status.HTTP_400_BAD_REQUEST
         return {"detail": "no sandbox ID specified"}
     response.status_code = status.HTTP_200_OK
-    return [op for op in store.get("operations") if op.sandbox_id == id]
+    return sorted([op for op in store.get("operations") if op.sandbox_id == id], key = lambda o: o.timestamp)

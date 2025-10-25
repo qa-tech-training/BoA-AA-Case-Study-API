@@ -38,6 +38,7 @@ class Operation(BaseModel):
     rg_name: str
     username: str | None = "clouduser"
     status: Status
+    timestamp: datetime
 
 class SandBox(BaseModel):
     id: UUID
