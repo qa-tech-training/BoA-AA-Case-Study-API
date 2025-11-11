@@ -1,4 +1,3 @@
 **/__pycache__/**
 **/venv/**
-api/req.json
-api/valid_tokens.json
+*.json

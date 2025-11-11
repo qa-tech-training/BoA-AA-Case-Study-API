@@ -2,6 +2,6 @@ FROM python:3.10
 
 COPY requirements.txt .
 RUN pip install -r requirements.txt
-COPY . .
+COPY *.py .
 
 ENTRYPOINT ["fastapi", "run", "main.py"]
